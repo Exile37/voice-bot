@@ -2,7 +2,7 @@ import os
 import time
 import tempfile
 import sqlite3
-from datetime import date, datetime
+from datetime import date
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
@@ -94,14 +94,9 @@ def is_premium(user_id):
     return bool(user[3])
 
 
-def make_premium(user_id):
-    db.execute("UPDATE users SET is_premium=1 WHERE user_id=?", (user_id,))
-    db.commit()
-
-
 def premium_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⭐ Купить Premium — 199 Stars", callback_data="buy_premium")],
+        [InlineKeyboardButton(text="⭐ Купить Premium — 100 Stars", callback_data="buy_premium")],
         [InlineKeyboardButton(text="🎁 Активировать промокод", callback_data="promo")],
     ])
 
@@ -129,6 +124,15 @@ def main_menu_keyboard():
     ])
 
 
+def back_button():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="← Назад", callback_data="menu_back")]
+    ])
+
+
+HTML = "HTML"
+
+
 @dp.message(CommandStart())
 async def start(message: Message):
     user = get_user(message.from_user.id, message.from_user.username)
@@ -141,12 +145,18 @@ async def start(message: Message):
         [InlineKeyboardButton(text="⭐ Premium", callback_data="menu_premium")],
     ])
 
+    if user[3]:
+        status = "⭐ Premium: безлимит расшифровок"
+    else:
+        status = f"🆓 Сегодня: {user[4]}/{FREE_LIMIT} расшифровок"
+
     await message.answer(
         f"Привет, <b>{name}</b>! 👋\n\n"
         "Я расшифровываю голосовые в текст за секунду.\n\n"
-        "📌 Просто отправь мне голосовое, аудио, видео или кружок.\n\n"
-        f"{'⭐ <b>Premium</b>: безлимит расшифровок' if user[3] else f'🆓 Сегодня: <b>{user[4]}/{FREE_LIMIT}</b> расшифровок'}",
+        "📌 Просто отправь голосовое, аудио, видео или кружок.\n\n"
+        f"{status}",
         reply_markup=kb,
+        parse_mode=HTML,
     )
 
 
@@ -160,9 +170,8 @@ async def cb_help(callback: CallbackQuery):
         "<b>Поддерживается:</b>\n"
         "🎤 Голосовые · 🎵 Аудио · 🎬 Видео · ⭕ Кружки\n\n"
         "🌍 Выбери язык для точности или оставь авто.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="← Назад", callback_data="menu_back")]
-        ]),
+        reply_markup=back_button(),
+        parse_mode=HTML,
     )
     await callback.answer()
 
@@ -170,10 +179,14 @@ async def cb_help(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_back")
 async def cb_back(callback: CallbackQuery):
     user = get_user(callback.from_user.id)
-    status = "⭐ Premium: безлимит" if user[3] else f"🆓 Сегодня: {user[4]}/{FREE_LIMIT}"
+    if user[3]:
+        status = "⭐ Premium: безлимит"
+    else:
+        status = f"🆓 Сегодня: {user[4]}/{FREE_LIMIT}"
     await callback.message.edit_text(
         f"🎙 <b>Voice to Text</b>\n\n{status}",
         reply_markup=main_menu_keyboard(),
+        parse_mode=HTML,
     )
     await callback.answer()
 
@@ -194,9 +207,8 @@ async def cb_set_lang(callback: CallbackQuery):
     set_lang(callback.from_user.id, lang)
     await callback.message.edit_text(
         f"✅ Язык: <b>{SUPPORTED_LANGS[lang]}</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="← Назад", callback_data="menu_back")]
-        ]),
+        reply_markup=back_button(),
+        parse_mode=HTML,
     )
     await callback.answer()
 
@@ -204,17 +216,22 @@ async def cb_set_lang(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_stats")
 async def cb_stats(callback: CallbackQuery):
     user = get_user(callback.from_user.id)
-    premium = "⭐ Premium" if user[3] else "🆓 Free"
-    remaining = "∞" if user[3] else max(0, FREE_LIMIT - user[4])
+    if user[3]:
+        premium = "⭐ Premium"
+        remaining = "∞"
+        used_display = "∞"
+    else:
+        premium = "🆓 Free"
+        remaining = str(max(0, FREE_LIMIT - user[4]))
+        used_display = f"{user[4]}/{FREE_LIMIT}"
     await callback.message.edit_text(
         f"📊 <b>Статистика</b>\n\n"
         f"👤 Тариф: {premium}\n"
         f"📈 Всего расшифровок: <b>{user[6]}</b>\n"
-        f"📅 Сегодня: <b>{user[4]}/{FREE_LIMIT if not user[3] else '∞'}</b>\n"
-        f"⏳ Осталось сегодня: <b>{remaining}</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="← Назад", callback_data="menu_back")]
-        ]),
+        f"📅 Сегодня: <b>{used_display}</b>\n"
+        f"⏳ Осталось: <b>{remaining}</b>",
+        reply_markup=back_button(),
+        parse_mode=HTML,
     )
     await callback.answer()
 
@@ -225,20 +242,20 @@ async def cb_premium(callback: CallbackQuery):
     if user[3]:
         await callback.message.edit_text(
             "⭐ <b>Premium активен!</b>\n\n"
-            "Ты уже имеешь безлимитные расшифровки.\n"
+            "У тебя безлимитные расшифровки.\n"
             "Спасибо за поддержку! ❤️",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="← Назад", callback_data="menu_back")]
-            ]),
+            reply_markup=back_button(),
+            parse_mode=HTML,
         )
     else:
         await callback.message.edit_text(
             "⭐ <b>Premium</b>\n\n"
             "<b>Free:</b> 10 расшифровок/день\n"
             "<b>Premium:</b> безлимит + приоритет\n\n"
-            "💳 Оплата: Telegram Stars (199 ⭐)\n"
+            "💳 Оплата: Telegram Stars (100 ⭐)\n"
             "Или введи промокод:",
             reply_markup=premium_keyboard(),
+            parse_mode=HTML,
         )
     await callback.answer()
 
@@ -246,11 +263,12 @@ async def cb_premium(callback: CallbackQuery):
 @dp.callback_query(F.data == "buy_premium")
 async def cb_buy(callback: CallbackQuery):
     await callback.message.answer(
-        "💳 Для оплаты Telegram Stars:\n\n"
+        "💳 Для оплаты:\n\n"
         "1. Напиши @QuarkBillsBot\n"
-        "2. Купи 199 Stars\n"
+        "2. Купи 100 Stars\n"
         "3. Пришли сюда код чека\n\n"
-        "Или напиши нам: @voice2text_support",
+        "Или напиши: @voice2text_support",
+        parse_mode=HTML,
     )
     await callback.answer()
 
@@ -270,9 +288,10 @@ async def help_cmd(message: Message):
         "🎙 <b>Как пользоваться:</b>\n\n"
         "Просто отправь голосовое, аудио или кружок.\n"
         "Бот вернёт текст.\n\n"
-        "🌍 Смена языка: нажми кнопку в меню.\n"
+        "🌍 Смена языка: кнопка в меню.\n"
         "📊 Статистика: кнопка в меню.\n"
         "⭐ Premium: безлимит расшифровок.",
+        parse_mode=HTML,
     )
 
 
@@ -297,6 +316,7 @@ async def handle_voice(message: Message):
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="⭐ Купить Premium — безлимит", callback_data="menu_premium")],
             ]),
+            parse_mode=HTML,
         )
         return
 
@@ -349,9 +369,15 @@ async def handle_voice(message: Message):
         increment_usage(user_id)
         new_remaining = remaining - 1
 
-        lang_label = f"🌍 {SUPPORTED_LANGS.get(detected, detected)}" if lang == "auto" else ""
+        if lang == "auto":
+            lang_label = f"🌍 {SUPPORTED_LANGS.get(detected, detected)}"
+        else:
+            lang_label = ""
         time_label = f"⚡ {elapsed}с"
-        limit_label = f"{'⭐' if is_premium(user_id) else f'🆓 {new_remaining}/{FREE_LIMIT}'}"
+        if is_premium(user_id):
+            limit_label = "⭐"
+        else:
+            limit_label = f"🆓 {new_remaining}/{FREE_LIMIT}"
 
         header_parts = [p for p in [lang_label, time_label, limit_label] if p]
         header = " · ".join(header_parts)
@@ -361,13 +387,13 @@ async def handle_voice(message: Message):
 
         if len(full_msg) <= max_len:
             try:
-                await status.edit_text(full_msg, parse_mode="HTML")
+                await status.edit_text(full_msg, parse_mode=HTML)
             except Exception:
                 await status.delete()
-                await message.answer(full_msg, parse_mode="HTML")
+                await message.answer(full_msg, parse_mode=HTML)
         else:
             await status.delete()
-            await message.answer(f"📝 {text[:max_len]}\n\n<i>{header}</i>", parse_mode="HTML")
+            await message.answer(f"📝 {text[:max_len]}\n\n<i>{header}</i>", parse_mode=HTML)
             for i in range(max_len, len(text), max_len):
                 await message.answer(f"📝 {text[i:i+max_len]}")
 
