@@ -39,15 +39,21 @@ db.commit()
 
 for col, definition in [
     ("premium_until", "TEXT"),
-    ("referral_code", "TEXT UNIQUE"),
+    ("referral_code", "TEXT"),
     ("referred_by", "INTEGER"),
     ("referrals_count", "INTEGER DEFAULT 0"),
 ]:
     try:
         db.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
         db.commit()
-    except sqlite3.OperationalError:
+    except Exception:
         pass
+
+try:
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_referral_code ON users(referral_code) WHERE referral_code IS NOT NULL")
+    db.commit()
+except Exception:
+    pass
 
 SUPPORTED_LANGS = {
     "ru": "Русский",
@@ -631,6 +637,7 @@ async def admin_stats(message: Message):
 
 
 async def main():
+    logging.info("Bot starting...")
     await dp.start_polling(bot)
 
 
