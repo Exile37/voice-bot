@@ -9,6 +9,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardButton, InlineKeyboardMarkup,
+    LabeledPrice, PreCheckoutQuery,
 )
 from groq import Groq
 import logging
@@ -262,15 +263,33 @@ async def cb_premium(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "buy_premium")
 async def cb_buy(callback: CallbackQuery):
-    await callback.message.answer(
-        "💳 Для оплаты:\n\n"
-        "1. Напиши @QuarkBillsBot\n"
-        "2. Купи 100 Stars\n"
-        "3. Пришли сюда код чека\n\n"
-        "Или напиши: @voice2text_support",
-        parse_mode=HTML,
+    await bot.send_invoice(
+        chat_id=callback.from_user.id,
+        title="⭐ Premium — безлимит",
+        description="Безлимитные расшифровки голосовых сообщений навсегда",
+        payload="premium_100",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label="Premium", amount=100)],
     )
     await callback.answer()
+
+
+@dp.pre_checkout_query(F.data.startswith("pre_checkout"))
+async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+
+@dp.message(F.successful_payment)
+async def process_successful_payment(message: Message):
+    if message.successful_payment.invoice_payload == "premium_100":
+        make_premium(message.from_user.id)
+        await message.answer(
+            "🎉 <b>Premium активирован!</b>\n\n"
+            "Теперь у тебя безлимитные расшифровки.\n"
+            "Спасибо за поддержку! ❤️",
+            parse_mode=HTML,
+        )
 
 
 @dp.callback_query(F.data == "promo")
