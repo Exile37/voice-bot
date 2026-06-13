@@ -85,7 +85,9 @@ async def handle_voice(message: Message):
         await status.edit_text("❌ Не удалось получить файл")
         return
 
-    ext = os.path.splitext(file_info.file_path)[1] or ".ogg"
+    ext = os.path.splitext(file_info.file_path)[1].lower() or ".ogg"
+    if ext in (".oga", ".opus"):
+        ext = ".ogg"
     lang = user_lang.get(message.from_user.id, "auto")
 
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
