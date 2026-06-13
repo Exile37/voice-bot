@@ -593,7 +593,7 @@ async def cb_export(callback: CallbackQuery):
     await callback.answer()
 
 
-@dp.message(F.text)
+@dp.message(F.text & ~F.text.startswith("/"))
 async def text_hint(message: Message):
     user = get_user(message.from_user.id)
     if is_premium(message.from_user.id):
