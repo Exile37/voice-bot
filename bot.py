@@ -31,15 +31,23 @@ db.execute("""CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     username TEXT,
     lang TEXT DEFAULT 'auto',
-    premium_until TEXT,
     today_count INTEGER DEFAULT 0,
     today_date TEXT,
-    total_count INTEGER DEFAULT 0,
-    referral_code TEXT UNIQUE,
-    referred_by INTEGER,
-    referrals_count INTEGER DEFAULT 0
+    total_count INTEGER DEFAULT 0
 )""")
 db.commit()
+
+for col, definition in [
+    ("premium_until", "TEXT"),
+    ("referral_code", "TEXT UNIQUE"),
+    ("referred_by", "INTEGER"),
+    ("referrals_count", "INTEGER DEFAULT 0"),
+]:
+    try:
+        db.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass
 
 SUPPORTED_LANGS = {
     "ru": "Русский",
@@ -90,10 +98,11 @@ def get_user(user_id, username=None):
 
 def is_premium(user_id):
     user = get_user(user_id)
-    if not user[3]:
+    premium_until = user[6]
+    if not premium_until:
         return False
     try:
-        until = datetime.fromisoformat(user[3])
+        until = datetime.fromisoformat(premium_until)
         return datetime.now() < until
     except Exception:
         return False
@@ -102,9 +111,9 @@ def is_premium(user_id):
 def activate_premium(user_id, days):
     user = get_user(user_id)
     now = datetime.now()
-    if user[3]:
+    if user[6]:
         try:
-            until = datetime.fromisoformat(user[3])
+            until = datetime.fromisoformat(user[6])
             if until > now:
                 until += timedelta(days=days)
             else:
@@ -119,10 +128,10 @@ def activate_premium(user_id, days):
 
 def premium_remaining_days(user_id):
     user = get_user(user_id)
-    if not user[3]:
+    if not user[6]:
         return 0
     try:
-        until = datetime.fromisoformat(user[3])
+        until = datetime.fromisoformat(user[6])
         delta = until - datetime.now()
         return max(0, delta.days)
     except Exception:
@@ -133,7 +142,7 @@ def can_use(user_id):
     user = get_user(user_id)
     if is_premium(user_id):
         return True, 999, 0
-    used = user[4]
+    used = user[3]
     remaining = FREE_LIMIT - used
     return remaining > 0, remaining, used
 
@@ -238,7 +247,7 @@ async def start(message: Message):
         days = premium_remaining_days(message.from_user.id)
         status = f"⭐ Premium: {days} дн."
     else:
-        status = f"🆓 Сегодня: {user[4]}/{FREE_LIMIT}"
+        status = f"🆓 Сегодня: {user[3]}/{FREE_LIMIT}"
 
     await message.answer(
         f"Привет, <b>{name}</b>! 👋\n\n"
@@ -273,7 +282,7 @@ async def cb_back(callback: CallbackQuery):
         days = premium_remaining_days(callback.from_user.id)
         status = f"⭐ Premium: {days} дн."
     else:
-        status = f"🆓 Сегодня: {user[4]}/{FREE_LIMIT}"
+        status = f"🆓 Сегодня: {user[3]}/{FREE_LIMIT}"
     await callback.message.edit_text(
         f"🎙 <b>Voice to Text</b>\n\n{status}",
         reply_markup=main_menu_keyboard(),
@@ -315,8 +324,8 @@ async def cb_stats(callback: CallbackQuery):
     await callback.message.edit_text(
         f"📊 <b>Статистика</b>\n\n"
         f"👤 Тариф: {premium}\n"
-        f"📈 Всего расшифровок: <b>{user[6]}</b>\n"
-        f"📅 Сегодня: <b>{user[4]}/{FREE_LIMIT}</b>\n"
+        f"📈 Всего расшифровок: <b>{user[5]}</b>\n"
+        f"📅 Сегодня: <b>{user[3]}/{FREE_LIMIT}</b>\n"
         f"👥 Рефералов: <b>{user[9]}</b>",
         reply_markup=back_button(),
         parse_mode=HTML,
@@ -585,7 +594,7 @@ async def text_hint(message: Message):
         days = premium_remaining_days(message.from_user.id)
         status = f"⭐ Premium: {days} дн."
     else:
-        status = f"🆓 {user[4]}/{FREE_LIMIT}"
+        status = f"🆓 {user[3]}/{FREE_LIMIT}"
     await message.answer(
         f"🎙 Отправь голосовое, аудио или кружок.\n\n{status}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
