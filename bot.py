@@ -1,8 +1,15 @@
 import os
+import time
 import tempfile
+import sqlite3
+from datetime import date, datetime
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message
+from aiogram.types import (
+    Message, CallbackQuery,
+    InlineKeyboardButton, InlineKeyboardMarkup,
+)
 from groq import Groq
 import logging
 
@@ -10,68 +17,291 @@ logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+FREE_LIMIT = 10
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 client = Groq(api_key=GROQ_API_KEY)
 
+db = sqlite3.connect("users.db")
+db.execute("""CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    lang TEXT DEFAULT 'auto',
+    is_premium INTEGER DEFAULT 0,
+    today_count INTEGER DEFAULT 0,
+    today_date TEXT,
+    total_count INTEGER DEFAULT 0
+)""")
+db.commit()
+
 SUPPORTED_LANGS = {
-    "ru": "Russian",
+    "ru": "Русский",
     "en": "English",
-    "uk": "Ukrainian",
-    "de": "German",
-    "fr": "French",
-    "es": "Spanish",
-    "auto": "Auto-detect",
+    "uk": "Українська",
+    "de": "Deutsch",
+    "fr": "Français",
+    "es": "Español",
+    "auto": "Авто",
 }
 
-user_lang = {}
+
+def get_user(user_id, username=None):
+    row = db.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
+    if not row:
+        db.execute("INSERT INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
+        db.commit()
+        return db.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
+    if username and username != row[1]:
+        db.execute("UPDATE users SET username=? WHERE user_id=?", (username, user_id))
+        db.commit()
+    today = date.today().isoformat()
+    if row[5] != today:
+        db.execute("UPDATE users SET today_count=0, today_date=? WHERE user_id=?", (today, user_id))
+        db.commit()
+        row = list(row)
+        row[5] = today
+        row[4] = 0
+    return row
+
+
+def can_use(user_id):
+    user = get_user(user_id)
+    if user[3]:
+        return True, 999, 0
+    used = user[4]
+    remaining = FREE_LIMIT - used
+    return remaining > 0, remaining, used
+
+
+def increment_usage(user_id):
+    db.execute("UPDATE users SET today_count=today_count+1, total_count=total_count+1 WHERE user_id=?", (user_id,))
+    db.commit()
+
+
+def set_lang(user_id, lang):
+    db.execute("UPDATE users SET lang=? WHERE user_id=?", (lang, user_id))
+    db.commit()
+
+
+def get_lang(user_id):
+    user = get_user(user_id)
+    return user[2]
+
+
+def is_premium(user_id):
+    user = get_user(user_id)
+    return bool(user[3])
+
+
+def make_premium(user_id):
+    db.execute("UPDATE users SET is_premium=1 WHERE user_id=?", (user_id,))
+    db.commit()
+
+
+def premium_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⭐ Купить Premium — 199 Stars", callback_data="buy_premium")],
+        [InlineKeyboardButton(text="🎁 Активировать промокод", callback_data="promo")],
+    ])
+
+
+def lang_keyboard(current_lang):
+    buttons = []
+    row = []
+    for code, name in SUPPORTED_LANGS.items():
+        prefix = "✅ " if code == current_lang else ""
+        row.append(InlineKeyboardButton(text=f"{prefix}{name}", callback_data=f"lang:{code}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def main_menu_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌍 Язык", callback_data="menu_lang")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="menu_stats")],
+        [InlineKeyboardButton(text="⭐ Premium", callback_data="menu_premium")],
+        [InlineKeyboardButton(text="❓ Помощь", callback_data="menu_help")],
+    ])
 
 
 @dp.message(CommandStart())
 async def start(message: Message):
+    user = get_user(message.from_user.id, message.from_user.username)
+    name = message.from_user.first_name
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎙 Отправить голосовое", callback_data="menu_help")],
+        [InlineKeyboardButton(text="🌍 Язык", callback_data="menu_lang"),
+         InlineKeyboardButton(text="📊 Статистика", callback_data="menu_stats")],
+        [InlineKeyboardButton(text="⭐ Premium", callback_data="menu_premium")],
+    ])
+
     await message.answer(
-        "🎙 <b>Voice to Text Bot</b>\n\n"
-        "Отправь голосовое или аудио — получишь текст.\n\n"
-        "Команды:\n"
-        "/lang ru — язык (ru, en, uk, de, fr, es, auto)\n"
-        "/lang — текущий язык\n"
-        "/help — помощь"
+        f"Привет, <b>{name}</b>! 👋\n\n"
+        "Я расшифровываю голосовые в текст за секунду.\n\n"
+        "📌 Просто отправь мне голосовое, аудио, видео или кружок.\n\n"
+        f"{'⭐ <b>Premium</b>: безлимит расшифровок' if user[3] else f'🆓 Сегодня: <b>{user[4]}/{FREE_LIMIT}</b> расшифровок'}",
+        reply_markup=kb,
     )
+
+
+@dp.callback_query(F.data == "menu_help")
+async def cb_help(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "🎙 <b>Как пользоваться:</b>\n\n"
+        "1. Запиши голосовое сообщение\n"
+        "2. Отправь его мне\n"
+        "3. Получи текст за 1-3 секунды\n\n"
+        "<b>Поддерживается:</b>\n"
+        "🎤 Голосовые · 🎵 Аудио · 🎬 Видео · ⭕ Кружки\n\n"
+        "🌍 Выбери язык для точности или оставь авто.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="← Назад", callback_data="menu_back")]
+        ]),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu_back")
+async def cb_back(callback: CallbackQuery):
+    user = get_user(callback.from_user.id)
+    status = "⭐ Premium: безлимит" if user[3] else f"🆓 Сегодня: {user[4]}/{FREE_LIMIT}"
+    await callback.message.edit_text(
+        f"🎙 <b>Voice to Text</b>\n\n{status}",
+        reply_markup=main_menu_keyboard(),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu_lang")
+async def cb_lang(callback: CallbackQuery):
+    current = get_lang(callback.from_user.id)
+    await callback.message.edit_text(
+        "🌍 Выбери язык распознавания:",
+        reply_markup=lang_keyboard(current),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("lang:"))
+async def cb_set_lang(callback: CallbackQuery):
+    lang = callback.data.split(":")[1]
+    set_lang(callback.from_user.id, lang)
+    await callback.message.edit_text(
+        f"✅ Язык: <b>{SUPPORTED_LANGS[lang]}</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="← Назад", callback_data="menu_back")]
+        ]),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu_stats")
+async def cb_stats(callback: CallbackQuery):
+    user = get_user(callback.from_user.id)
+    premium = "⭐ Premium" if user[3] else "🆓 Free"
+    remaining = "∞" if user[3] else max(0, FREE_LIMIT - user[4])
+    await callback.message.edit_text(
+        f"📊 <b>Статистика</b>\n\n"
+        f"👤 Тариф: {premium}\n"
+        f"📈 Всего расшифровок: <b>{user[6]}</b>\n"
+        f"📅 Сегодня: <b>{user[4]}/{FREE_LIMIT if not user[3] else '∞'}</b>\n"
+        f"⏳ Осталось сегодня: <b>{remaining}</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="← Назад", callback_data="menu_back")]
+        ]),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu_premium")
+async def cb_premium(callback: CallbackQuery):
+    user = get_user(callback.from_user.id)
+    if user[3]:
+        await callback.message.edit_text(
+            "⭐ <b>Premium активен!</b>\n\n"
+            "Ты уже имеешь безлимитные расшифровки.\n"
+            "Спасибо за поддержку! ❤️",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="← Назад", callback_data="menu_back")]
+            ]),
+        )
+    else:
+        await callback.message.edit_text(
+            "⭐ <b>Premium</b>\n\n"
+            "<b>Free:</b> 10 расшифровок/день\n"
+            "<b>Premium:</b> безлимит + приоритет\n\n"
+            "💳 Оплата: Telegram Stars (199 ⭐)\n"
+            "Или введи промокод:",
+            reply_markup=premium_keyboard(),
+        )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "buy_premium")
+async def cb_buy(callback: CallbackQuery):
+    await callback.message.answer(
+        "💳 Для оплаты Telegram Stars:\n\n"
+        "1. Напиши @QuarkBillsBot\n"
+        "2. Купи 199 Stars\n"
+        "3. Пришли сюда код чека\n\n"
+        "Или напиши нам: @voice2text_support",
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "promo")
+async def cb_promo(callback: CallbackQuery):
+    await callback.message.answer(
+        "🎁 Введи промокод:\n\n"
+        "Просто напиши код сообщением.",
+    )
+    await callback.answer()
 
 
 @dp.message(Command("help"))
 async def help_cmd(message: Message):
-    langs = ", ".join(f"<code>{k}</code>" for k in SUPPORTED_LANGS)
     await message.answer(
-        "🎤 <b>Как использовать:</b>\n"
-        "1. Запиши голосовое или пришли аудио/видео\n"
-        "2. Бот пришлёт текст\n\n"
-        f"🌍 Языки: {langs}\n\n"
-        "⚡ Поддерживается: .ogg, .mp3, .wav, .m4a, .mp4 (аудио)"
+        "🎙 <b>Как пользоваться:</b>\n\n"
+        "Просто отправь голосовое, аудио или кружок.\n"
+        "Бот вернёт текст.\n\n"
+        "🌍 Смена языка: нажми кнопку в меню.\n"
+        "📊 Статистика: кнопка в меню.\n"
+        "⭐ Premium: безлимит расшифровок.",
     )
 
 
 @dp.message(Command("lang"))
-async def set_lang(message: Message):
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        current = user_lang.get(message.from_user.id, "auto")
-        await message.answer(f"🌍 Текущий язык: <code>{current}</code>\n\nНапиши /lang ru чтобы сменить")
-        return
-
-    lang = args[1].strip().lower()
-    if lang not in SUPPORTED_LANGS:
-        await message.answer(f"❌ Неизвестный язык. Доступные: {', '.join(SUPPORTED_LANGS)}")
-        return
-
-    user_lang[message.from_user.id] = lang
-    await message.answer(f"✅ Язык установлен: <b>{SUPPORTED_LANGS[lang]}</b>")
+async def set_lang_cmd(message: Message):
+    current = get_lang(message.from_user.id)
+    await message.answer(
+        "🌍 Выбери язык:",
+        reply_markup=lang_keyboard(current),
+    )
 
 
 @dp.message(F.voice | F.audio | F.video | F.video_note)
 async def handle_voice(message: Message):
-    status = await message.answer("⏳ Расшифровываю...")
+    user_id = message.from_user.id
+    allowed, remaining, used = can_use(user_id)
+
+    if not allowed:
+        await message.answer(
+            f"🚫 Лимит исчерпан: <b>{used}/{FREE_LIMIT}</b> сегодня.\n\n"
+            "⏳ Сброс завтра или:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⭐ Купить Premium — безлимит", callback_data="menu_premium")],
+            ]),
+        )
+        return
+
+    start_time = time.time()
+    status = await message.answer("🎙 Расшифровываю...")
 
     file_info = None
     if message.voice:
@@ -90,7 +320,7 @@ async def handle_voice(message: Message):
     ext = os.path.splitext(file_info.file_path)[1].lower() or ".ogg"
     if ext in (".oga", ".opus"):
         ext = ".ogg"
-    lang = user_lang.get(message.from_user.id, "auto")
+    lang = get_lang(user_id)
 
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         await bot.download_file(file_info.file_path, tmp.name)
@@ -98,7 +328,11 @@ async def handle_voice(message: Message):
 
     try:
         with open(tmp_path, "rb") as audio_file:
-            kwargs = {"model": "whisper-large-v3-turbo", "file": audio_file, "response_format": "verbose_json"}
+            kwargs = {
+                "model": "whisper-large-v3-turbo",
+                "file": audio_file,
+                "response_format": "verbose_json",
+            }
             if lang != "auto":
                 kwargs["language"] = lang
 
@@ -106,24 +340,36 @@ async def handle_voice(message: Message):
 
         text = transcript.text.strip()
         detected = getattr(transcript, "language", "unknown")
+        elapsed = round(time.time() - start_time, 1)
 
         if not text:
             await status.edit_text("🤷 Не удалось распознать речь. Попробуй ещё раз.")
             return
 
-        header = f"🌍 {detected}\n\n" if lang == "auto" else ""
+        increment_usage(user_id)
+        new_remaining = remaining - 1
+
+        lang_label = f"🌍 {SUPPORTED_LANGS.get(detected, detected)}" if lang == "auto" else ""
+        time_label = f"⚡ {elapsed}с"
+        limit_label = f"{'⭐' if is_premium(user_id) else f'🆓 {new_remaining}/{FREE_LIMIT}'}"
+
+        header_parts = [p for p in [lang_label, time_label, limit_label] if p]
+        header = " · ".join(header_parts)
+
         max_len = 4000
-        if len(text) <= max_len:
+        full_msg = f"📝 {text}\n\n<i>{header}</i>"
+
+        if len(full_msg) <= max_len:
             try:
-                await status.edit_text(f"{header}📝 {text}")
+                await status.edit_text(full_msg, parse_mode="HTML")
             except Exception:
                 await status.delete()
-                await message.answer(f"{header}📝 {text}")
+                await message.answer(full_msg, parse_mode="HTML")
         else:
             await status.delete()
-            for i in range(0, len(text), max_len):
-                await message.answer(f"{header}📝 {text[i:i+max_len]}")
-                header = ""
+            await message.answer(f"📝 {text[:max_len]}\n\n<i>{header}</i>", parse_mode="HTML")
+            for i in range(max_len, len(text), max_len):
+                await message.answer(f"📝 {text[i:i+max_len]}")
 
     except Exception as e:
         logging.error(f"Transcription error: {e}")
@@ -137,7 +383,19 @@ async def handle_voice(message: Message):
 
 @dp.message(F.text)
 async def text_hint(message: Message):
-    await message.answer("🎤 Отправь голосовое сообщение или аудио, и я расшифрую в текст.")
+    user = get_user(message.from_user.id)
+    if user[3]:
+        status = "⭐ Premium: безлимит"
+    else:
+        status = f"🆓 {user[4]}/{FREE_LIMIT}"
+
+    await message.answer(
+        f"🎙 Отправь голосовое, аудио или кружок.\n\n{status}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🌍 Язык", callback_data="menu_lang"),
+             InlineKeyboardButton(text="📊 Статистика", callback_data="menu_stats")],
+        ]),
+    )
 
 
 async def main():
