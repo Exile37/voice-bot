@@ -613,6 +613,7 @@ async def text_hint(message: Message):
 @dp.message(Command("admin"))
 async def admin_stats(message: Message):
     if message.from_user.id not in ADMIN_IDS:
+        await message.answer(f"❌ Твой ID: {message.from_user.id}\nДобавь его в ADMIN_IDS в Railway")
         return
     total = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     premium_count = db.execute(
@@ -621,19 +622,51 @@ async def admin_stats(message: Message):
     today_total = db.execute(
         "SELECT SUM(today_count) FROM users WHERE today_date=?", (date.today().isoformat(),)
     ).fetchone()[0] or 0
-    total_revenue = db.execute(
-        "SELECT COUNT(*) FROM users WHERE premium_until IS NOT NULL AND premium_until > ?",
-        (datetime.now().isoformat(),)
-    ).fetchone()[0]
     await message.answer(
         f"🛡 <b>Админ-панель</b>\n\n"
         f"👥 Всего пользователей: <b>{total}</b>\n"
         f"⭐ Premium: <b>{premium_count}</b>\n"
-        f"📊 Расшифровок сегодня: <b>{today_total}</b>\n"
-        f"💰 Платящих: <b>{total_revenue}</b>\n\n"
-        f"💡 Баланс Stars: @BotFather → /mybots → Payments",
+        f"📊 Расшифровок сегодня: <b>{today_total}</b>\n\n"
+        f"💡 Баланс Stars: @BotFather → /mybots → Payments\n\n"
+        f"<b>Команды:</b>\n"
+        f"/activate user_id дни — выдать Premium\n"
+        f"/users — список всех",
         parse_mode=HTML,
     )
+
+
+@dp.message(Command("activate"))
+async def admin_activate(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    parts = message.text.split()
+    if len(parts) < 3:
+        await message.answer("Использование: /activate user_id дни\nПример: /activate 123456789 7")
+        return
+    try:
+        target_id = int(parts[1])
+        days = int(parts[2])
+    except ValueError:
+        await message.answer("ID и дни должны быть числами")
+        return
+    get_user(target_id)
+    activate_premium(target_id, days)
+    await message.answer(f"✅ Premium выдан пользователю {target_id} на {days} дн.")
+
+
+@dp.message(Command("users"))
+async def admin_users(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    rows = db.execute(
+        "SELECT user_id, username, premium_until, today_count, total_count FROM users ORDER BY total_count DESC LIMIT 20"
+    ).fetchall()
+    lines = []
+    for r in rows:
+        prem = "⭐" if r[2] and r[2] > datetime.now().isoformat() else "🆓"
+        lines.append(f"{prem} {r[1] or r[0]} | сегодня: {r[3]} | всего: {r[4]}")
+    text = "\n".join(lines) if lines else "Нет пользователей"
+    await message.answer(f"👥 <b>Топ-20:</b>\n\n{text}", parse_mode=HTML)
 
 
 async def main():
