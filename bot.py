@@ -69,7 +69,7 @@ async def set_lang(message: Message):
     await message.answer(f"✅ Язык установлен: <b>{SUPPORTED_LANGS[lang]}</b>")
 
 
-@dp.message(F.voice | F.audio | F.video)
+@dp.message(F.voice | F.audio | F.video | F.video_note)
 async def handle_voice(message: Message):
     status = await message.answer("⏳ Расшифровываю...")
 
@@ -80,6 +80,8 @@ async def handle_voice(message: Message):
         file_info = await bot.get_file(message.audio.file_id)
     elif message.video:
         file_info = await bot.get_file(message.video.file_id)
+    elif message.video_note:
+        file_info = await bot.get_file(message.video_note.file_id)
 
     if not file_info:
         await status.edit_text("❌ Не удалось получить файл")
