@@ -107,19 +107,26 @@ async def handle_voice(message: Message):
             await status.edit_text("🤷 Не удалось распознать речь. Попробуй ещё раз.")
             return
 
-        header = f"🌍 <i>{detected}</i>\n\n" if lang == "auto" else ""
+        header = f"🌍 {detected}\n\n" if lang == "auto" else ""
         max_len = 4000
         if len(text) <= max_len:
-            await status.edit_text(f"{header}📝 <b>{text}</b>", parse_mode="HTML")
+            try:
+                await status.edit_text(f"{header}📝 {text}")
+            except Exception:
+                await status.delete()
+                await message.answer(f"{header}📝 {text}")
         else:
             await status.delete()
             for i in range(0, len(text), max_len):
-                await message.answer(f"{header}📝 <b>{text[i:i+max_len]}</b>", parse_mode="HTML")
+                await message.answer(f"{header}📝 {text[i:i+max_len]}")
                 header = ""
 
     except Exception as e:
         logging.error(f"Transcription error: {e}")
-        await status.edit_text(f"❌ Ошибка: {e}")
+        try:
+            await status.edit_text(f"❌ Ошибка: {e}")
+        except Exception:
+            await message.answer(f"❌ Ошибка: {e}")
     finally:
         os.unlink(tmp_path)
 
