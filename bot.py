@@ -216,6 +216,16 @@ async def start(message: Message):
     user = get_user(message.from_user.id, message.from_user.username)
     name = message.from_user.first_name
 
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"👤 Новый пользователь: <b>{name}</b> (@{message.from_user.username or 'нет'})",
+                parse_mode=HTML,
+            )
+        except Exception:
+            pass
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎙 Отправить голосовое", callback_data="menu_help")],
         [InlineKeyboardButton(text="🌍 Язык", callback_data="menu_lang"),
@@ -368,6 +378,25 @@ async def pre_checkout(query: PreCheckoutQuery):
 @dp.message(F.successful_payment)
 async def on_payment(message: Message):
     payload = message.successful_payment.invoice_payload
+    amount = message.successful_payment.total_amount
+    username = message.from_user.username or "нет"
+    user_id = message.from_user.id
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"💰 <b>Новая оплата!</b>\n\n"
+                f"👤 Пользователь: @{username} (ID: {user_id})\n"
+                f"💎 Сумма: {amount} Stars\n"
+                f"📦 Тариф: {payload}\n\n"
+                f"⏳ Stars зачислятся на баланс бота через ~48 часов.\n"
+                f"Проверить: @BotFather → /mybots → Payments",
+                parse_mode=HTML,
+            )
+        except Exception:
+            pass
+
     if payload.startswith("premium:"):
         plan = payload.split(":")[1]
         if plan in PLANS:
@@ -577,11 +606,17 @@ async def admin_stats(message: Message):
     today_total = db.execute(
         "SELECT SUM(today_count) FROM users WHERE today_date=?", (date.today().isoformat(),)
     ).fetchone()[0] or 0
+    total_revenue = db.execute(
+        "SELECT COUNT(*) FROM users WHERE premium_until IS NOT NULL AND premium_until > ?",
+        (datetime.now().isoformat(),)
+    ).fetchone()[0]
     await message.answer(
         f"🛡 <b>Админ-панель</b>\n\n"
         f"👥 Всего пользователей: <b>{total}</b>\n"
         f"⭐ Premium: <b>{premium_count}</b>\n"
-        f"📊 Расшифровок сегодня: <b>{today_total}</b>",
+        f"📊 Расшифровок сегодня: <b>{today_total}</b>\n"
+        f"💰 Платящих: <b>{total_revenue}</b>\n\n"
+        f"💡 Баланс Stars: @BotFather → /mybots → Payments",
         parse_mode=HTML,
     )
 
