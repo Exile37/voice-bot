@@ -26,7 +26,9 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 client = Groq(api_key=GROQ_API_KEY)
 
-db = sqlite3.connect("users.db")
+db_path = os.getenv("DB_PATH", "/data/users.db")
+os.makedirs(os.path.dirname(db_path), exist_ok=True)
+db = sqlite3.connect(db_path)
 db.execute("""CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     username TEXT,
