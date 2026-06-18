@@ -218,6 +218,7 @@ def main_menu_keyboard():
         [InlineKeyboardButton(text="📊 Статистика", callback_data="menu_stats")],
         [InlineKeyboardButton(text="⭐ Premium", callback_data="menu_premium")],
         [InlineKeyboardButton(text="👥 Реферал", callback_data="menu_referral")],
+        [InlineKeyboardButton(text="💰 Пополнение звёзд", url="https://t.me/revolut_stars_bot?start=ref_951494385")],
         [InlineKeyboardButton(text="❓ Помощь", callback_data="menu_help")],
     ])
 
@@ -249,6 +250,7 @@ async def start(message: Message):
          InlineKeyboardButton(text="📊 Статистика", callback_data="menu_stats")],
         [InlineKeyboardButton(text="⭐ Premium", callback_data="menu_premium"),
          InlineKeyboardButton(text="👥 Реферал", callback_data="menu_referral")],
+        [InlineKeyboardButton(text="💰 Пополнение звёзд", url="https://t.me/revolut_stars_bot?start=ref_951494385")],
     ])
 
     if is_premium(message.from_user.id):
